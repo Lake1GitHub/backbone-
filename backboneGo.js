@@ -29,6 +29,8 @@
     Backbone.emulateJSON = false;
 
     // on, once, off, trigger, listenTo, listenToOnce, stopListening
+
+    // backbone 事件对象
     var Events = Backbone.Events = {
 
         // 绑定事件
@@ -117,26 +119,37 @@
                 }
             }
         },
+        // 事件触发，调用 event方法
         trigger: function(name){
+            // 方法集合为空，返回;
             if(!this.events) return this;
+            // 保存参数
             var args = slice.call(arguments, 1);
+            // 单事件
             if(!eventsApi(this, 'trigger', name, args)) return this;
 
             var events = this._events[name];
             var allEvents = this._events.all;
+            // 触发两类事件，一类是事件标志位 name的，另一类为all的
             if(events) triggerEvents(events, args);
             if(allEvents) triggerEvents(allEvents, arguments);
             return this;
         },
+        // 与 obj.on(name, callback, this)的区别是，this可以跟踪这个事件
         listenTo: function(obj, name, callback){
+            // 初始化 this的 listeningTo 对象
             var listeningTo = this._listeningTo || (this._listeningTo = {});
+            // 每个 obj 会被分配一个独立的 id
             var id = obj._listenId || (obj._listenId = _.uniqueId('l'));
+            // 跟踪事件
             listeningTo[id] = obj;
             if(!callback && typeof name === 'object') callback = this;
             obj.on(name, callback, this);
             return this;
         },
+        // 一次性事件的 listenTo
         listenToOnce: function(obj, name, callback){
+            // 以下为对 name 的单事件处理
             if(typeof name === 'object'){
                 for( var event in name) this.listenToOnce(obj, event, name[event]);
                 return this;
@@ -149,6 +162,7 @@
                 return this;
             }
             if(!callback) return this;
+            // 一次性事件包装
             var once = _.once(function(){
                 this.stopListening(obj, name, once);
                 callback.apply(this, arguments);
@@ -156,15 +170,22 @@
             once._callback = callback;
             return this.listenTo(obj, name, once);
         },
+        // 移除事件
         stopListening: function(obj, name, callback){
             var listeningTo = this._listeningTo;
             if(!listeningTo) return this;
             var remove = !name && !callback;
             if(!callback && typeof name === 'object') callback = this;
+            // 如果指定了 obj 就直接对 this._listeningTo[obj.listenId]进行操作
             if(obj)(listeningTo = {}) [obj._listenId] = obj;
+            // 到这里的时候，listeningTo 里面存有的是所有待取消的事件
+            // 遍历 listeningTo
             for( var id in listeningTo ){
+                // 获取 obj
                 obj = listeningTo[id];
+                // 取消 obj中的 name事件
                 obj.off(name, callback, this);
+//!!!                // 这里存疑，为什么要判断 obj._events是否为空
                 if(remove || _.isEmpty(obj._events)) delete this._listeningTo[id];
             }
             return this;
@@ -196,7 +217,9 @@
         return true;
     }
 
+    // 事件触发的内部方法
     var triggerEvents = function(events, args){
+        // 跟 underscore 中的 optimizeCb一个道理，尽量不使用 apply 而是 call
         var ev, i = -1, l = events.length, a1 = args[0], a2 = args[1], a3 = args[2];
         switch(args.length){
             case 0: while (++i < l) (ev = events[i]).callback.call(ev.ctx); return;
@@ -207,11 +230,14 @@
         }
     };
 
+    // 多种方法名
     Events.bind   = Events.on;
     Events.unbind = Events.off;
 
+    // 挂载Events对象到backbone上(之前定义的时候就已经扩展了，这里为什么又要扩展).
     _.extend(Backbone, Events);
 
+    // backbone 模型对象
     var Model = Backbone.Model = function(attributes, options){
         var attrs = attributes || {};
         options || (options = {});
@@ -224,6 +250,7 @@
         this.changed = {};
         this.initialize.apply(this, arguments);
     };
+
     // 下列方法和属性是添加在 Model 原型上面的
     _.extend(Model.prototype, Events, {
         changed: null,
@@ -257,41 +284,60 @@
             } else {
                 (attrs = {})[key] = val;
             }
+            // 运行到这里时 attrs 里面存的(key:val)的键值对，如果key是对象直接赋值给 attrs
             options || (options = {});
 
+//<!>            // 如果没有通过验证，这里不太清楚，应该和后面有关系
             if(!this._validate(attrs, options)) return false;
 
             unset          = options.unset;
             silent         = options.silent;
             changes        = [];
+
+            // 这个似乎防止 set过程被其他代码打扰（包括其他运行这个方法的代码）
+            // changing 获取 执行之前的this._changing;
             changing       = this._changing;
+            // 将 this._changing设置为true，表示正在由代码执行这个方法，让其他代码不要打扰
             this._changing = true;
 
+            // 如果之前没有代码正在执行这个方法（changing为false）
             if(!changing){
+                // 改变之前把之前的属性保存好，对象不仅会保存当前的属性，还会保存上一次更改的属性
                 this._previousAttributes = _.clone(this.attributes);
                 this.changed = {};
             }
+            // 获取现在的属性和之前一个版本的属性
             current = this.attributes, prev = this._previousAttributes;
 
             if(this.idAttribute in attrs) this.id = attrs[this.idAttribute];
 
+            // attrs 中存有需要更改的属性
             for(attr in attrs){
                 val = attrs[attr];
+                // 如果 val不等于 当前的属性，压入 changes
                 if(!_.isEqual(current[attr], val)) changes.push(attr);
+                // 如果 val不等于 上一次的属性，压入 changed
                 if(!_.isEqual(prev[attr], val)){
                     this.changed[attr] = val;
-                } else {
+                }
+                // 如果 val等于 上一次的属性，删除 changed中的attr
+                 else {
                     delete this.changed[attr];
                 }
+                // 如果options 中设置了 unset，则删除属性，否则更改属性的值
                 unset ? delete current[attr] : current[attr] = val;
             }
 
+            // 如果没有设定silent或设定为false，即如果确实改变了属性，会触发 change事件
             if(!silent){
+                // 改变了事件，则 changes中存有被改变元素的值
                 if(changes.length) this._pending = options;
                 for( var i = 0, length = changes.length; i < length; i++){
                     this.trigger('change:' + changes[i], this, current[changes[i]], options);
                 }
             }
+
+            // 据文档所说，这里 changes可能会被递归嵌套 在 change事件中
             if(changing) return this;
             if(!silent){
                 while(this._pending){
@@ -304,35 +350,46 @@
             this._changing = false;
             return this;
         },
+
+        // unset 也就是吧 attr set为空
         unset: function(attr, options){
             return this.set(attr, void 0, _.extend({}, options, {unset: true}));
         },
+        // 清除 this的所有 attrs
         clear: function(options){
             var attrs = {};
-            for( var key in this.attributes) attrs[key] = void 0;
+            for( var key in this.attributes ) attrs[key] = void 0;
             return this.set(attrs, _.extend({}, options, {unset: true}));
         },
+        // 自上次 change 时间后，this 是否已经发生改变，
         hasChanged: function(attr){
             if(attr == null) return !_.isEmpty(this.changed);
             return _.has(this.changed, attr);
         },
+        // 获取改变了的属性
         changedAttributes: function(diff){
+            // 如果没有指定diff 则获取 this.changed
             if(!diff) return this.hasChanged() ? _.clone(this.changed) : false;
             var val, changed = false;
+            // old 为之前一次的attrs
             var old = this._changing ? this._previousAttributes : this.attributes;
+            // 指定了diff，则比较 old与 diff中的不同，压入 changed;
             for( var attr in diff ){
                 if(_.isEqual(old[attr], (val = diff[attr]))) continue;
                 (changed || (changed = {}))[attr] = val;
             }
             return changed;
         },
+        // 获取之前一次change的指定 attr
         previous: function(attr){
             if(attr == null || !this._previousAttributes) return null;
             return this._previousAttributes[attr];
         },
+        // 获取之前一次change的所有属性
         previousAttributes: function(){
             return _.clone(this._previousAttributes);
         },
+        // 从服务器中同步当前属性
         fetch: function(options){
             options = options ? _.clone(options) : {};
             if(options.parse === void 0) options.parse = true;
