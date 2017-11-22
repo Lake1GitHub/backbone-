@@ -31,16 +31,24 @@
     // on, once, off, trigger, listenTo, listenToOnce, stopListening
 
     // backbone 事件对象
-    var Events = Backbone.Events = {
 
+    // Events 默认属性（动态操作）
+    // _events 在 this.on 中注册( this.once 会调用 this.on 方法)
+    //
+    // _events：obj 中所有绑定的事件，以事件名为索引，包含了回调函数和上下文环境
+    //
+    //
+    //
+
+    var Events = Backbone.Events = {
         // 绑定事件
         on: function(name, callback, context){
             // 如果不是单事件绑定，解开成单事件，然后绑定，而此次操作直接返回即可
             if(!eventsApi(this, 'on', name, [callback, context]) || !callback) return this;
             // 如果是单事件，this._events初始化，这里 this也就是指绑定 Events的 object
-            this._events || (this.events = {});
-            // 注册事件
-            var events = this._events[name] || (this.events[name] = []);
+            this._events || (this._events = {});
+            // 注册事件，这里获取的是引用，所以后面修改是有用的
+            var events = this._events[name] || (this._events[name] = []);
             // 事件入栈
             events.push({callback: callback, context: context, ctx: context || this});
             // 链式调用
@@ -49,14 +57,15 @@
         once: function(name, callback, context){
             // 单事件
             if(!eventsApi(this, 'once', name, [callback, context]) || !callback) return this;
-            // 保留 this
+            // 保留 上下文环境
             var self = this;
-            // 用 _.once包装，只会执行一次
+            // 用 _.once包装
             var once = _.once(function(){
                 self.off(name, once);
                 callback.apply(this, arguments);
             });
-            // 设置 once的成员 _callback 为回调函数
+            // 设置 once的成员 _callback 为回调函数，这里由于callback被包装成once，但是callback还是有用的（譬如解绑的时候）
+            // 所以这里设置once的_callback为 callback 来保存callback
             once._callback = callback;
             // 执行绑定，由于 once 是包装过的，所以只会执行一次
             return this.on(name, once, context);
@@ -516,4 +525,126 @@
     };
     var setOptions = {add: true, remove: true, merge: true};
     var addOptions = {add: true, remove: false};
+
+    _.extend(Collection.prototype, Events, {
+        model: Model,
+
+        initialize: function(){},
+
+        toJSON: function(options){
+            return this.map(function(model){ return model.toJSON(options); });
+        },
+
+        sync: function(){
+            return Backbone.sync.apply(this, arguments);
+        },
+
+        add: function(){
+            return this.set(models, _.extend({merge: false}, options, addOptions));
+        },
+
+        remove: function(models, options){
+            // 包装成数组，获得拷贝
+            var singular = !_.isArray(models);
+            models =singular ? [models] : _.clone(models);
+            options || (options = {});
+            // 遍历 models
+            for(var i = 0, lengdth = models.length; i < length; i++){
+                // 获取数组元素
+                var model = models[i] = this.get(models[i]);
+                // 元素为空，下一次循环
+                if(!model) continue;
+                // 获取 id
+                var id = this.modelId(model.attributes);
+                if(id != null) delete this._byId[id];
+                delete this._byId[model.cid];
+                var index = this.indexOf(model);
+                this.models.splice(index, 1);
+                this.length--;
+                if(!options.silent){
+                    options.index = index;
+                    model.trigger('remove', model, this, options);
+                }
+                // 触发 remove 事件
+                this._removeReference(model, options);
+            }
+            return singular ? models[0] : models;
+        },
+        set: function(models, options){
+            options = _.defaults({}, options, setOptions);
+            if(options.parse) models = this.parse(models, options);
+            var singular = !_.isArray(models);
+            models = singular ? (models ? [models] : []) : models.slice();
+            var id, model, attrs, existing, sort;
+            var at = options.at;
+            if(at != null) at = +at;
+            if(at < 0) at += this.length + 1;
+            var sortable = this.comparator && (at == null) && options.sort !== false;
+            var sortAttr = _.isString(this.comparator) ? this.comparator : null;
+            var toAdd = [], toRemove = [], modelMap = {};
+            var add = options.add, merge = options.merge, remove = options.remove;
+            var order = !sortable && add && remove ? [] : false;
+            var orderChanged = false;
+
+            for(var i = 0, length = models.length; i < length; i++){
+                attrs = models[i];
+                if(existing = this.get(attrs)){
+                    if(remove) modelMap[existing.cid] = true;
+                    if(merge && attrs !== existing){
+                        attrs = this._isModel(attrs) ? attrs.attributes : attrs;
+                        if (options.parse) attrs = existing.parse(attrs, options);
+                        existing.set(attrs, options);
+                        if (sortable && !sort && existing.hasChanged(sortAttr)) sort = true;
+                    }
+                    models[i] = existing;
+                } else if(add){
+                    model = models[i] = this._prepareModel(attrs, options);
+                    if(!model) continue;
+                    toAdd.push(model);
+                    this._addReference(model, options);
+                }
+                model = existing || modeld;
+                if(!model) continue;
+                id = this.modelId(model.attributes);
+                if(order && (model.isNew() || !modelMap[id])){
+                    order.push(model);
+                    orderChanged = orderChanged || !this.model[i] || model.cid !== this.models[i].cid;
+                }
+                modelMap[id] = true;
+            }
+            if(remove){
+                for(var i = 0, length = this.length; i < length; i++){
+                    if(!modelMap[(model = this.models[i]).cid]) toRemove.push(model);
+                }
+                if(toRemove.length) this.remove(toRemove, options);
+            }
+            if(toAdd.length || orderChanged){
+                if(sortable) sort = true;
+                this.length += toAdd.length;
+                if(at != null){
+                    for(var i = 0, length = toAdd.length; i < length; i++){
+                        this.models.splice(at + i, 0, toAdd[i]);
+                    }
+                } else {
+                    if(order) this.models.length = 0;
+                    var orderedModels = order || toAdd;
+                    for( var i = 0, length = orderedModels.length; i < length; i++){
+                        this.models.push(orderedModels[i]);
+                    }
+                }
+            }
+
+            if(sort) this.sort({silent: true});
+
+            if(!options.silent){
+                var addOpts = at != null ? _.clone(options) : options;
+                for(var i = 0, length = toAdd.length; i < length; i++){
+                    if(at != null) addOpts.index = at + i;
+                    (model = toAdd[i]).trigger('add', model, this, addOpts);
+                }
+                if(sort || orderChanged) this.trigger('sort', this, options);
+            }
+            return singular ? models[0] : models;
+        }
+    })
 }))
