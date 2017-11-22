@@ -311,13 +311,13 @@
 
             // 如果之前没有代码正在执行这个方法（changing为false）
             if(!changing){
-                // 改变之前把之前的属性保存好，对象不仅会保存当前的属性，还会保存上一次更改的属性
                 this._previousAttributes = _.clone(this.attributes);
                 this.changed = {};
             }
             // 获取现在的属性和之前一个版本的属性
             current = this.attributes, prev = this._previousAttributes;
 
+            // 这里单独处理的id属性
             if(this.idAttribute in attrs) this.id = attrs[this.idAttribute];
 
             // attrs 中存有需要更改的属性
@@ -325,7 +325,7 @@
                 val = attrs[attr];
                 // 如果 val不等于 当前的属性，压入 changes
                 if(!_.isEqual(current[attr], val)) changes.push(attr);
-                // 如果 val不等于 上一次的属性，压入 changed
+                // 如果 val不等于 上一次的属性，压入 changed，这里记录了至少两次更改的值
                 if(!_.isEqual(prev[attr], val)){
                     this.changed[attr] = val;
                 }
@@ -334,6 +334,7 @@
                     delete this.changed[attr];
                 }
                 // 如果options 中设置了 unset，则删除属性，否则更改属性的值
+                // 这里就是更改属性值的地方
                 unset ? delete current[attr] : current[attr] = val;
             }
 
